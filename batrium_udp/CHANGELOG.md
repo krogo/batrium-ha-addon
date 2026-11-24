@@ -1,6 +1,6 @@
 ## 1.1.1 (fork)
 
-Corrections from the first run against a live WM5:
+Corrections from the first run against a live WatchMon Core + CellMate K9:
 
 - Fix: charger/inverter (0x4932) voltages are 0.1 V/bit, not 0.01 — targets read 5.74 / 4.62 V instead of 57.4 / 46.2 V.
 - Fix: WatchMon timestamps are local wall-clock time, not UTC; they were shown shifted by the UTC offset. Now given Home Assistant's timezone. Adds `tzdata`.

@@ -68,7 +68,7 @@ def _epoch(ts: int) -> str | None:
     """
     WatchMon "epoch" seconds -> ISO-8601 for HA timestamp sensors; 0 = never.
 
-    The WatchMon counts in LOCAL wall-clock time, not UTC: on a live WM5 in
+    The WatchMon counts in LOCAL wall-clock time, not UTC: on a live WatchMon Core + CellMate K9 in
     America/New_York the clock field read 12:43 when it was 12:43 EST. So
     the seconds are decoded as a wall-clock time and given HA's timezone.
     """
@@ -111,7 +111,7 @@ MSG_NAMES = {
 
 # Message types Batrium documents (WatchMonUdpListener/payload) that this add-on
 # deliberately does not decode: mostly setup/configuration echoes that only
-# change when the WatchMon is reconfigured. Seen on a live WM5 broadcasting
+# change when the WatchMon is reconfigured. Seen on a live WatchMon Core + CellMate K9 broadcasting
 # alongside the telemetry. Logged once at debug, not as a warning.
 KNOWN_UNDECODED = {
     0x4033: "StatusSlow",
@@ -413,7 +413,7 @@ def parse_3f34(data: bytes) -> dict | None:
         # Bit order taken from Batrium's comments (bit0 first); unverified on hardware.
         "soc_recal_needed":      bool(flags & 0x0C),
         # Upstream read relay_1..3 from data[39:42]. Those bytes are inside the
-        # avg_charge_a float (38..41); on a live WM5 all three read "on" with no
+        # avg_charge_a float (38..41); on a live WatchMon Core + CellMate K9 all three read "on" with no
         # relays wired. Relays are only real in 0x3F33.
     }
 
@@ -532,7 +532,7 @@ def parse_3233(data: bytes) -> dict | None:
     """
     Live Display (0x3233, 57 bytes, 2s, FW ≥ 2.15).
 
-    Its kWh in/out fields (38/42) are NOT lifetime: on a live WM5 they equal
+    Its kWh in/out fields (38/42) are NOT lifetime: on a live WatchMon Core + CellMate K9 they equal
     0x5432's daily kWh to within the 20 s between the two messages, so they are
     not published (the daily sensors cover them).
     """

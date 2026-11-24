@@ -339,7 +339,7 @@ def build_group_discovery_configs(
 
     elif msg_type == MSG_STATUS_FAST:
         # Real relay/contactor states. Only registered if the WatchMon sends
-        # 0x3F33; a WM5 on current firmware does not.
+        # 0x3F33; a WatchMon Core on current firmware does not.
         B("contactor_battery", "Battery Contactor", "contactor_batt")
         B("load_contactor",    "Load Contactor",    "load_contactor")
         B("expansion_battery", "Expansion Battery", "expansion_battery_on")

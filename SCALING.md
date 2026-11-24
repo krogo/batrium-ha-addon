@@ -54,9 +54,9 @@ The reference applies no scaling to any of these.
 
 ## Timestamps
 
-Every WatchMon "epoch" field (system clock, last remote message, SOC recalibration) counts **local wall-clock seconds**, not UTC. On a live WM5 in America/New_York the clock read 12:43 at 12:43 EST. The add-on decodes them as wall-clock time and attaches Home Assistant's timezone (the `TZ` the Supervisor gives add-ons).
+Every WatchMon "epoch" field (system clock, last remote message, SOC recalibration) counts **local wall-clock seconds**, not UTC. On a live WatchMon Core + CellMate K9 in America/New_York the clock read 12:43 at 12:43 EST. The add-on decodes them as wall-clock time and attaches Home Assistant's timezone (the `TZ` the Supervisor gives add-ons).
 
-## Checked against a live WM5 (14S, 750 Ah, charging at 72 A)
+## Checked against a live WatchMon Core with CellMate K9 (14S, 750 Ah, charging at 72 A)
 
 Consistent with each other: cell voltages × 14 ≈ pack voltage; pack V × current = power; capacity to full + to empty = 750 Ah and to-empty / 750 = SOC; capacity to full ÷ current ≈ minutes to full; daily Ah × pack V ≈ daily kWh.
 
