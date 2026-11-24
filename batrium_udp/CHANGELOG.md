@@ -1,3 +1,16 @@
+## 1.1.0 (fork)
+
+- Add: decoders for 0x5732 SystemDiscovery, 0x4932 RemoteStatus, 0x3233 LiveDisplay, 0x5432 DailySession and 0x7832 ShuntMetrics, from Batrium's published layouts. Their entities are registered the first time each message arrives, so message types your WatchMon never sends don't leave permanently-unknown entities.
+- Add: the rest of 0x3F34 — supply voltage, ambient and shunt temperature, capacity to full/empty, estimated minutes to full/empty, average charge/discharge/net current, SOC-recalibration flag.
+- Add: lifetime and daily kWh in/out as `energy` / `total_increasing` sensors, usable in the Energy dashboard.
+- Add: pack min/max/avg cell voltage and min/max temperature are derived from the per-cell messages when the WatchMon sends no pack summary (0x3E33/0x5732/0x3233). A pack message always wins over the derived value.
+- Change: units now V, A, kW, Ah (were mV, mA, W, mAh), matching the Node-RED flow this replaces. Unique IDs changed with the units and the old entities are removed on start, so HA history isn't mixed across scales.
+- Fix: bypass session values from 0x3E33 were raw mAh labelled Ah. Now divided by 1000, per Batrium's reference.
+- Fix: cell status names for codes 4, 6, 10, 11, 12 (Timeout, Disabled, MissingSetup, NoConfig, CellOutLimits) were reported as Unknown.
+- Change: message types Batrium documents but this add-on doesn't decode (setup echoes, lifetime/history metrics, comms status) are logged once at debug instead of as a warning. Types not in Batrium's published list are logged once at info. A live WM5 sends about 20 of these, which previously filled the log with warnings.
+- Change: `image:` removed from config.yaml, so Home Assistant builds the add-on locally from this repository.
+- Note: the 0x3F34 "relay" fields read bytes 39–41, which Batrium's layout puts inside the average-charge-current float. Left in place so existing entities don't vanish, but they are almost certainly not relays.
+
 ## 1.0.6
 
 - Fix: an MQTT connection the broker refuses is now explained instead of numbered. `MQTT connect failed (rc=5)` becomes "the broker refused the connection as not authorised", plus what to check — `rc=4` and `rc=5` mean the credentials were rejected, and with the Mosquitto addon that is almost always a blank or non-existent `mqtt_username`/`mqtt_password`.
