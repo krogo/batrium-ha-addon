@@ -14,6 +14,32 @@ Hardware note on cell voltages via UDP:
 
 import struct
 import logging
+from datetime import datetime, timezone
+
+
+# --- Units -------------------------------------------------------------------
+# This fork publishes in the units the original Node-RED flow used, so existing
+# dashboards/automations keep their scaling: volts (V), amps (A), kilowatts (kW),
+# amp-hours (Ah), kWh, °C, minutes, percent. Raw WatchMon units are converted
+# here, in one place, so main.py and discovery.py never see mV/mA/W.
+
+def _mv_to_v(mv: float) -> float:
+    return round(mv / 1000.0, 3)
+
+
+def _ma_to_a(ma: float) -> float:
+    return round(ma / 1000.0, 2)
+
+
+def _w_to_kw(w: float) -> float:
+    return round(w / 1000.0, 2)
+
+
+def _epoch(ts: int) -> str | None:
+    """WatchMon epoch seconds -> ISO-8601 for HA timestamp sensors; 0 = never."""
+    if ts <= 0:
+        return None
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,6 +53,11 @@ MSG_STATUS_RAPID_OLD = 0x3E5A  # Pack stats, SW ≤ 1.0.29; 300ms
 MSG_CELL_STATS       = 0x3E33  # Pack stats, SW ≥ 2.15;   300ms
 MSG_STATUS_FAST      = 0x3F33  # SOC, relays, contactors (older FW)
 MSG_STATUS_SHUNT     = 0x3F34  # ShuntCurrent/Voltage/Power/SOC (FW ≥ 2.15); 300ms
+MSG_SYSTEM_DISCOVERY = 0x5732  # System status, cell summary, shunt summary; 2s
+MSG_REMOTE_STATUS    = 0x4932  # Charger/inverter remote (CAN) target & actual; 2s
+MSG_LIVE_DISPLAY     = 0x3233  # Live display incl. lifetime kWh (FW ≥ 2.15); 2s
+MSG_DAILY_SESSION    = 0x5432  # Today's session: kWh/Ah in/out, peaks; 20s
+MSG_SHUNT_METRICS    = 0x7832  # Shunt SOC cycles and recalibration times; 30s
 
 MSG_NAMES = {
     MSG_CELL_NODE:        "0x4232 CellNode",
@@ -35,6 +66,11 @@ MSG_NAMES = {
     MSG_CELL_STATS:       "0x3E33 PackStats",
     MSG_STATUS_FAST:      "0x3F33 SystemStatus",
     MSG_STATUS_SHUNT:     "0x3F34 ShuntStatus",
+    MSG_SYSTEM_DISCOVERY: "0x5732 SystemDiscovery",
+    MSG_REMOTE_STATUS:    "0x4932 RemoteStatus",
+    MSG_LIVE_DISPLAY:     "0x3233 LiveDisplay",
+    MSG_DAILY_SESSION:    "0x5432 DailySession",
+    MSG_SHUNT_METRICS:    "0x7832 ShuntMetrics",
 }
 
 # Smallest packet each parser can decode. Single source of truth: the parsers
@@ -48,12 +84,50 @@ MIN_LEN = {
     MSG_CELL_STATS:       48,
     MSG_STATUS_FAST:      62,
     MSG_STATUS_SHUNT:     50,
+    MSG_SYSTEM_DISCOVERY: 50,
+    MSG_REMOTE_STATUS:    62,
+    MSG_LIVE_DISPLAY:     51,   # fields used end at SystemTime (47..50)
+    MSG_DAILY_SESSION:    69,
+    MSG_SHUNT_METRICS:    32,
 }
 
-# TODO: decode additional packets for HA energy dashboard integration
-#   0x5432  Msg_5432_DailySession     — DailySessionCumulShuntkWhCharge/Dischg, peak currents
-#   0x7832  Msg_7832_HwShuntMetrics   — hardware shunt metrics, lifetime totals
-#   See: github.com/Batrium/WatchMonUdpListener/tree/master/payload
+# WatchMon system operating status, as carried by 0x5732 and 0x3233.
+# Source: WatchMonUdpListener/payload/Msg_5732_SystemDiscovery.js
+SYSTEM_OP_STATUS_NAMES = {
+    0:  "Simulator",
+    1:  "Idle",
+    2:  "Discharging",
+    3:  "SoC Empty",
+    4:  "Charging",
+    5:  "Full",
+    6:  "Timeout",
+    7:  "Critical Pending",
+    8:  "Critical Offline",
+    9:  "MQTT Offline",
+    10: "Auth Setup",
+    11: "Shunt Timeout",
+}
+
+AUTH_MODE_NAMES = {0: "Default", 1: "Technician", 2: "Factory"}
+
+POWER_RATE_NAMES = {0: "Off", 2: "Limited Power", 4: "Normal Power"}
+
+CMU_POLLER_MODE_NAMES = {
+    0:  "Idle",
+    1:  "Normal",
+    2:  "Collection Start",
+    3:  "Collection Running",
+    4:  "Sync Start",
+    5:  "Sync Running",
+    6:  "Network Test Start",
+    7:  "Bypass Test Start",
+    8:  "Bypass Test Running",
+    9:  "Network Test Running",
+    10: "Reboot All Start",
+    11: "Rebooting All Devices",
+    12: "Simulator Start",
+    13: "Simulator Running",
+}
 
 OP_STATUS_NAMES = {
     0: "Timeout",
@@ -67,14 +141,19 @@ OP_STATUS_NAMES = {
 }
 
 NODE_STATUS_NAMES = {
-    0: "None",
-    1: "HighVolt",
-    2: "HighTemp",
-    3: "Ok",
-    5: "LowVolt",
-    7: "InBypass",
-    8: "InitialBypass",
-    9: "FinalBypass",
+    0:  "None",
+    1:  "HighVolt",
+    2:  "HighTemp",
+    3:  "Ok",
+    4:  "Timeout",
+    5:  "LowVolt",
+    6:  "Disabled",
+    7:  "InBypass",
+    8:  "InitialBypass",
+    9:  "FinalBypass",
+    10: "MissingSetup",
+    11: "NoConfig",
+    12: "CellOutLimits",
 }
 
 SHUNT_STATUS_NAMES = {
@@ -113,16 +192,16 @@ def parse_4232(data: bytes) -> dict | None:
     op = data[20]
     return {
         "node_id":       data[8],
-        "volt_min":      struct.unpack_from("<h", data, 10)[0],    # mV
-        "volt_max":      struct.unpack_from("<h", data, 12)[0],    # mV
+        "volt_min_v":    _mv_to_v(struct.unpack_from("<h", data, 10)[0]),
+        "volt_max_v":    _mv_to_v(struct.unpack_from("<h", data, 12)[0]),
         "temp_c":        data[14] - 40,                             # °C (min cell temp on node)
         "bypass_temp_c": data[15] - 40,                             # °C (bypass resistor temp)
-        "bypass_ma":     struct.unpack_from("<h", data, 16)[0],    # mA (0 = not balancing)
+        "bypass_a":      _ma_to_a(struct.unpack_from("<h", data, 16)[0]),  # 0 = not balancing
         "op_status":     op,
         "op_status_name": NODE_STATUS_NAMES.get(op, f"Unknown({op})"),
         "in_bypass":     op in (7, 8, 9),
         "is_overdue":    bool(data[21]),
-        "bypass_mah":    round(struct.unpack_from("<f", data, 47)[0], 2),
+        "bypass_session_ah": round(struct.unpack_from("<f", data, 47)[0] / 1000.0, 3),
     }
 
 
@@ -141,20 +220,20 @@ def parse_3e33(data: bytes) -> dict | None:
         _LOGGER.debug("0x3E33/3E5A too short: %d bytes", len(data))
         return None
     return {
-        "volt_min":              struct.unpack_from("<h", data,  8)[0],   # mV
-        "volt_max":              struct.unpack_from("<h", data, 10)[0],   # mV
+        "volt_min_v":            _mv_to_v(struct.unpack_from("<h", data,  8)[0]),
+        "volt_max_v":            _mv_to_v(struct.unpack_from("<h", data, 10)[0]),
         "temp_min_c":            data[14] - 40,                            # °C
         "temp_max_c":            data[15] - 40,                            # °C
         "temp_avg_c":            data[30] - 40,                            # °C
-        "min_bypass_ma":         struct.unpack_from("<h", data, 18)[0],   # mA
-        "max_bypass_ma":         struct.unpack_from("<h", data, 20)[0],   # mA peak balancing
-        "volt_avg":              struct.unpack_from("<h", data, 28)[0],   # mV
+        "min_bypass_a":          _ma_to_a(struct.unpack_from("<h", data, 18)[0]),
+        "max_bypass_a":          _ma_to_a(struct.unpack_from("<h", data, 20)[0]),  # peak balancing
+        "volt_avg_v":            _mv_to_v(struct.unpack_from("<h", data, 28)[0]),
         "bypass_count":          data[33],                                  # cells actively balancing
         "cells_overdue":         data[34],                                  # CMU comms failures
         "cells_active":          data[35],                                  # cells responding
         "cells_in_system":       data[36],                                  # total cell count
-        "min_bypass_session_ah": round(struct.unpack_from("<f", data, 38)[0], 3),  # Ah
-        "max_bypass_session_ah": round(struct.unpack_from("<f", data, 42)[0], 3),  # Ah
+        "min_bypass_session_ah": round(struct.unpack_from("<f", data, 38)[0] / 1000.0, 3),
+        "max_bypass_session_ah": round(struct.unpack_from("<f", data, 42)[0] / 1000.0, 3),
     }
 
 
@@ -181,7 +260,7 @@ def parse_415a(data: bytes) -> dict | None:
       [4 + n*11 + 4:6] volt_max  (int16le, mV)
       [4 + n*11 + 6]   temp_min  (raw, -40 = °C)
       [4 + n*11 + 7]   temp_max  (raw)
-      [4 + n*11 + 8:10] bypass_ma (int16le, mA)
+      [4 + n*11 + 8:10] bypass current (int16le, mA → A)
       [4 + n*11 + 10]  op_status
     """
     min_len = MIN_LEN[MSG_CELL_NODE_STATUS]  # header + 4-byte array header
@@ -204,11 +283,11 @@ def parse_415a(data: bytes) -> dict | None:
         op   = payload[base + 10]
         nodes.append({
             "node_id":    payload[base],
-            "volt_min":   struct.unpack_from("<h", payload, base + 2)[0],  # mV
-            "volt_max":   struct.unpack_from("<h", payload, base + 4)[0],  # mV
+            "volt_min_v": _mv_to_v(struct.unpack_from("<h", payload, base + 2)[0]),
+            "volt_max_v": _mv_to_v(struct.unpack_from("<h", payload, base + 4)[0]),
             "temp_min_c": payload[base + 6] - 40,                           # °C
             "temp_max_c": payload[base + 7] - 40,
-            "bypass_ma":  struct.unpack_from("<h", payload, base + 8)[0],  # mA
+            "bypass_a":   _ma_to_a(struct.unpack_from("<h", payload, base + 8)[0]),
             "op_status":  op,
             "op_status_name": NODE_STATUS_NAMES.get(op, f"Unknown({op})"),
             "in_bypass":  op in (7, 8, 9),
@@ -252,14 +331,31 @@ def parse_3f34(data: bytes) -> dict | None:
     else:
         op, op_name = 1, "Idle"
 
+    flags = data[25]
     return {
         "op_status":       op,
         "op_status_name":  op_name,
         "soc_pct":         round((soc_raw * 0.5) - 5, 1),   # WatchMon estimate
         "shunt_soc_pct":   round(struct.unpack_from("<h", data, 22)[0] / 100.0, 2),  # Coulomb counted
-        "shunt_volt_mv":   struct.unpack_from("<H", data, 12)[0] * 10,  # uint16/100=V → ×10=mV
-        "shunt_ma":        shunt_ma,                          # mA, negative=discharge positive=charge
-        "shunt_watt":      round(struct.unpack_from("<f", data, 18)[0], 1),  # W, same sign
+        "shunt_volt_v":    round(struct.unpack_from("<H", data, 12)[0] / 100.0, 2),  # uint16 (see 1.0.3)
+        "shunt_a":         _ma_to_a(shunt_ma),                # negative=discharge positive=charge
+        "shunt_kw":        _w_to_kw(struct.unpack_from("<f", data, 18)[0]),  # same sign
+        # Previously undecoded fields, per Batrium's Msg_3f34_StatusShunt.js:
+        "supply_volt_v":         round(struct.unpack_from("<H", data, 8)[0] / 100.0, 2),  # WatchMon supply
+        "ambient_temp_c":        data[10] - 40,
+        "shunt_temp_c":          data[11] - 40,
+        "capacity_to_full_ah":   round(struct.unpack_from("<f", data, 26)[0] / 1000.0, 2),
+        "capacity_to_empty_ah":  round(struct.unpack_from("<f", data, 30)[0] / 1000.0, 2),
+        "est_mins_to_full":      struct.unpack_from("<h", data, 34)[0],
+        "est_mins_to_empty":     struct.unpack_from("<h", data, 36)[0],
+        "avg_charge_a":          round(struct.unpack_from("<f", data, 38)[0] / 1000.0, 2),
+        "avg_discharge_a":       round(struct.unpack_from("<f", data, 42)[0] / 1000.0, 2),
+        "avg_net_a":             round(struct.unpack_from("<f", data, 46)[0] / 1000.0, 2),
+        # Bit order taken from Batrium's comments (bit0 first); unverified on hardware.
+        "soc_recal_needed":      bool(flags & 0x0C),
+        # NOTE: data[39:42] overlap avg_charge_a (38..41) per Batrium's layout, so
+        # the "relay" reads below are probably bytes of that float, not relays.
+        # Kept so existing entities don't vanish; don't trust them.
         "relay_1":         bool(data[39]),
         "relay_2":         bool(data[40]),
         "relay_3":         bool(data[41]),
@@ -290,4 +386,160 @@ def parse_3f33(data: bytes) -> dict | None:
         "relay_4":             bool(data[53]),
         "contactor_batt":      bool(data[60]),
         "load_contactor":      bool(data[61]),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Messages added in this fork. Layouts from Batrium's WatchMonUdpListener
+# (github.com/Batrium/WatchMonUdpListener/tree/master/payload); offsets below
+# are from the start of the packet, including the 8-byte header.
+
+
+def parse_5732(data: bytes) -> dict | None:
+    """
+    System Discovery (0x5732, 50 bytes, 2s).
+
+    The WatchMon's own system status (not inferred from shunt current), the
+    power-rate states it is commanding, and a cell summary. Useful on units
+    that do not transmit 0x3E33.
+    """
+    if len(data) < MIN_LEN[MSG_SYSTEM_DISCOVERY]:
+        return None
+    op     = data[24]
+    auth   = data[25]
+    chg    = data[27]
+    dis    = data[28]
+    poller = data[40]
+    return {
+        "system_code":            data[8:16].split(b"\x00", 1)[0].decode("ascii", "replace"),
+        "firmware_version":       struct.unpack_from("<h", data, 16)[0],
+        "hardware_version":       struct.unpack_from("<h", data, 18)[0],
+        "system_time":            _epoch(struct.unpack_from("<i", data, 20)[0]),
+        "system_op_status":       op,
+        "system_op_status_name":  SYSTEM_OP_STATUS_NAMES.get(op, f"Unknown({op})"),
+        "auth_mode_name":         AUTH_MODE_NAMES.get(auth, f"Unknown({auth})"),
+        "critical_batt_ok":       bool(data[26]),
+        "charge_rate_name":       POWER_RATE_NAMES.get(chg, f"Unknown({chg})"),
+        "discharge_rate_name":    POWER_RATE_NAMES.get(dis, f"Unknown({dis})"),
+        "heat_on":                bool(data[29]),
+        "cool_on":                bool(data[30]),
+        "volt_min_v":             _mv_to_v(struct.unpack_from("<h", data, 31)[0]),
+        "volt_max_v":             _mv_to_v(struct.unpack_from("<h", data, 33)[0]),
+        "volt_avg_v":             _mv_to_v(struct.unpack_from("<h", data, 35)[0]),
+        "temp_min_c":             data[37] - 40,
+        "cells_active":           data[38],
+        "cmu_poller_mode_name":   CMU_POLLER_MODE_NAMES.get(poller, f"Unknown({poller})"),
+        "shunt_status":           data[48],
+        "shunt_status_name":      SHUNT_STATUS_NAMES.get(data[48], f"Unknown({data[48]})"),
+    }
+
+
+def parse_4932(data: bytes) -> dict | None:
+    """
+    Control Remote Status (0x4932, 62 bytes, 2s).
+
+    What the WatchMon is asking a CAN-connected charger/inverter for (target)
+    and what that device reports back (actual).
+
+    Scaling: Batrium's reference applies none. Amps are divided by 10 to match
+    the Node-RED flow this fork replaces (0.1 A/bit). Volts are assumed 0.01
+    V/bit like every other voltage in this protocol, and VA is passed raw —
+    neither has been checked against hardware.
+    """
+    if len(data) < MIN_LEN[MSG_REMOTE_STATUS]:
+        return None
+
+    def side(base: int, temp_off: int, prefix: str) -> dict:
+        tv, ta, tva, av, aa, ava = struct.unpack_from("<hhhhhh", data, base)
+        return {
+            f"{prefix}_temp_c":         data[temp_off] - 40,
+            f"{prefix}_target_v":       round(tv / 100.0, 2),
+            f"{prefix}_target_a":       round(ta / 10.0),
+            f"{prefix}_target_va":      tva,
+            f"{prefix}_actual_v":       round(av / 100.0, 2),
+            f"{prefix}_actual_a":       round(aa / 10.0, 1),
+            f"{prefix}_actual_va":      ava,
+            f"{prefix}_last_rx":        _epoch(struct.unpack_from("<I", data, base + 20)[0]),
+        }
+
+    out = {
+        "can_rx_status_ticks":  data[8],
+        "can_rx_unknown_ticks": data[9],
+        "can_tx_cmd_ticks":     data[10],
+    }
+    out.update(side(12, 11, "remote_charge"))
+    out.update(side(38, 37, "remote_discharge"))
+    return out
+
+
+def parse_3233(data: bytes) -> dict | None:
+    """
+    Live Display (0x3233, 57 bytes, 2s, FW ≥ 2.15).
+
+    The one message carrying lifetime cumulative kWh in and out of the shunt —
+    the right source for HA's Energy dashboard (it never resets daily).
+    """
+    if len(data) < MIN_LEN[MSG_LIVE_DISPLAY]:
+        return None
+    op     = data[8]
+    b10    = data[10]
+    b11    = data[11]
+    return {
+        "system_op_status":       op,
+        "system_op_status_name":  SYSTEM_OP_STATUS_NAMES.get(op, f"Unknown({op})"),
+        # Bit order per Batrium's comments (bit0 = first listed). Unverified.
+        "critical_batt_ok":       bool(b10 & 0x01),
+        "heat_on":                bool(b10 & 0x08),
+        "cool_on":                bool(b10 & 0x10),
+        "charge_on":              bool(b11 & 0x01),
+        "charge_limited":         bool(b11 & 0x02),
+        "discharge_on":           bool(b11 & 0x04),
+        "discharge_limited":      bool(b11 & 0x08),
+        "volt_min_v":             _mv_to_v(struct.unpack_from("<h", data, 12)[0]),
+        "volt_max_v":             _mv_to_v(struct.unpack_from("<h", data, 14)[0]),
+        "volt_avg_v":             _mv_to_v(struct.unpack_from("<h", data, 16)[0]),
+        "temp_min_c":             data[18] - 40,
+        "temp_max_c":             data[19] - 40,
+        "temp_avg_c":             data[20] - 40,
+        "bypass_count":           data[21],
+        "lifetime_kwh_charge":    round(struct.unpack_from("<f", data, 38)[0] / 1000.0, 3),
+        "lifetime_kwh_discharge": round(struct.unpack_from("<f", data, 42)[0] / 1000.0, 3),
+        "critical_events":        data[46],
+        "system_time":            _epoch(struct.unpack_from("<i", data, 47)[0]),
+    }
+
+
+def parse_5432(data: bytes) -> dict | None:
+    """Daily Session (0x5432, 69 bytes, 20s): today's totals and extremes."""
+    if len(data) < MIN_LEN[MSG_DAILY_SESSION]:
+        return None
+    return {
+        "daily_volt_min_v":        _mv_to_v(struct.unpack_from("<h", data, 8)[0]),
+        "daily_volt_max_v":        _mv_to_v(struct.unpack_from("<h", data, 10)[0]),
+        "daily_temp_min_c":        data[16] - 40,
+        "daily_temp_max_c":        data[17] - 40,
+        "daily_pack_volt_min_v":   round(struct.unpack_from("<H", data, 18)[0] / 100.0, 2),
+        "daily_pack_volt_max_v":   round(struct.unpack_from("<H", data, 20)[0] / 100.0, 2),
+        # Batrium's JS uses (x-5)/2 here but x/2-5 everywhere else; the latter
+        # matches the SOC field it is a min/max of, so use it.
+        "daily_soc_min_pct":       round(data[22] * 0.5 - 5, 1),
+        "daily_soc_max_pct":       round(data[23] * 0.5 - 5, 1),
+        "daily_peak_charge_a":     round(struct.unpack_from("<h", data, 40)[0] / 100.0, 2),
+        "daily_peak_discharge_a":  round(struct.unpack_from("<h", data, 42)[0] / 100.0, 2),
+        "daily_critical_events":   data[44],
+        "daily_ah_charge":         round(struct.unpack_from("<f", data, 53)[0] / 1000.0, 2),
+        "daily_ah_discharge":      round(struct.unpack_from("<f", data, 57)[0] / 1000.0, 2),
+        "daily_kwh_charge":        round(struct.unpack_from("<f", data, 61)[0] / 1000.0, 3),
+        "daily_kwh_discharge":     round(struct.unpack_from("<f", data, 65)[0] / 1000.0, 3),
+    }
+
+
+def parse_7832(data: bytes) -> dict | None:
+    """Hardware Shunt Metrics (0x7832, 32 bytes, 30s): SOC cycles, recal times."""
+    if len(data) < MIN_LEN[MSG_SHUNT_METRICS]:
+        return None
+    return {
+        "shunt_soc_cycles":      struct.unpack_from("<h", data, 10)[0],
+        "shunt_last_lo_recal":   _epoch(struct.unpack_from("<I", data, 16)[0]),
+        "shunt_last_hi_recal":   _epoch(struct.unpack_from("<I", data, 20)[0]),
     }

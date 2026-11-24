@@ -48,28 +48,45 @@ All entities appear under a single **Batrium** device in HA → Settings → Dev
 
 | Entity | Unit | Notes |
 |--------|------|-------|
-| Cell Voltage Min / Max / Avg | mV | Pack-wide aggregate |
-| Cell Voltage Spread | mV | Max − Min, imbalance indicator |
+| Cell Voltage Min / Max / Avg | V | Pack-wide aggregate (derived from cells if the WatchMon sends no pack summary) |
+| Cell Voltage Spread | V | Max − Min, imbalance indicator |
 | Cell Temp Min / Max / Avg | °C | |
-| Pack Voltage | mV | From shunt |
-| Shunt Current | mA | Positive = charging, negative = discharging |
-| Pack Power | W | Positive = charging, negative = discharging |
+| Pack Voltage | V | From shunt |
+| Shunt Current | A | Positive = charging, negative = discharging |
+| Pack Power | kW | Positive = charging, negative = discharging |
 | State of Charge | % | WatchMon estimate |
 | SOC (Coulomb) | % | Coulomb-counted SOC |
 | System Status | text | Idle / Charging / Discharging — derived from shunt current |
 | Cells Balancing | count | |
 | Cells Active / In System | count | |
-| Min / Peak Bypass Current | mA | Balancing current |
+| Min / Peak Bypass Current | A | Balancing current |
 | Relay 1 / 2 / 3 | on/off | |
 | Balancing Active | on/off | True if any cell is balancing |
+| Supply Voltage, Ambient / Shunt Temp | V, °C | From 0x3F34 |
+| Capacity To Full / Empty | Ah | From 0x3F34 |
+| Estimated Time To Full / Empty | min | From 0x3F34 |
+| Average Charge / Discharge / Net Current | A | From 0x3F34 |
+
+### Added on first receipt of their message (fork)
+
+| Source | Entities |
+|--------|----------|
+| 0x5732 SystemDiscovery | WatchMon Status (the WatchMon's own, not derived), Charge / Discharge Power State, Critical Battery OK, Heating / Cooling On, Auth Mode, Cell Poller Mode, Firmware, WatchMon Clock |
+| 0x3233 LiveDisplay | Lifetime Energy In / Out (kWh, `total_increasing` — use these for the Energy dashboard), Charging / Discharging Allowed, Charge / Discharge Limited, Critical Events |
+| 0x4932 RemoteStatus | Charger / Inverter Target and Actual Voltage and Current, Temp, Last Message |
+| 0x5432 DailySession | Today Energy In / Out (kWh), Today Charge / Discharge (Ah), peaks, daily min/max cell V, temp, SOC |
+| 0x7832 ShuntMetrics | SOC Cycles, Last Low / High SOC Recalibration |
+
+See [SCALING.md](SCALING.md) for every field's raw encoding and how it is scaled.
 
 ### Per-cell (appear as cells are discovered, within ~1s of start)
 
 | Entity | Unit |
 |--------|------|
-| Cell N Voltage | mV |
+| Cell N Voltage | V |
 | Cell N Temp | °C |
-| Cell N Bypass Current | mA |
+| Cell N Bypass Current | A |
+| Cell N Bypass Session | Ah |
 | Cell N Status | text |
 | Cell N In Bypass | on/off |
 
