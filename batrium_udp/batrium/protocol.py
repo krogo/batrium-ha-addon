@@ -82,6 +82,29 @@ MSG_NAMES = {
     MSG_SHUNT_METRICS:    "0x7832 ShuntMetrics",
 }
 
+# Message types Batrium documents (WatchMonUdpListener/payload) that this add-on
+# deliberately does not decode: mostly setup/configuration echoes that only
+# change when the WatchMon is reconfigured. Seen on a live WM5 broadcasting
+# alongside the telemetry. Logged once at debug, not as a warning.
+KNOWN_UNDECODED = {
+    0x4033: "StatusSlow",
+    0x4733: "StatusControlLogic",
+    0x4A36: "HwSystemSetup",
+    0x4B36: "HwCellGroupSetup",
+    0x4C34: "HwShuntSetup",
+    0x4D34: "HwExpansionSetup",
+    0x4E33: "ControlRemoteSetup",
+    0x4F33: "ControlCriticalSetup",
+    0x5033: "ControlChargeSetup",
+    0x5158: "ControlDischargeSetup",
+    0x5233: "ControlThermalSetup",
+    0x5335: "HwIntegrationSetup",
+    0x5634: "LifetimeMetricsB",
+    0x5635: "LifetimeMetricsA",
+    0x6133: "StatusComms",
+    0x6831: "QuickSessionHist",
+}
+
 # Smallest packet each parser can decode. Single source of truth: the parsers
 # guard on these, and main.py reports the first packet of each type against
 # them — so a message that arrives too short to decode is announced in the log

@@ -7,6 +7,7 @@
 - Change: units now V, A, kW, Ah (were mV, mA, W, mAh), matching the Node-RED flow this replaces. Unique IDs changed with the units and the old entities are removed on start, so HA history isn't mixed across scales.
 - Fix: bypass session values from 0x3E33 were raw mAh labelled Ah. Now divided by 1000, per Batrium's reference.
 - Fix: cell status names for codes 4, 6, 10, 11, 12 (Timeout, Disabled, MissingSetup, NoConfig, CellOutLimits) were reported as Unknown.
+- Change: message types Batrium documents but this add-on doesn't decode (setup echoes, lifetime/history metrics, comms status) are logged once at debug instead of as a warning. Types not in Batrium's published list are logged once at info. A live WM5 sends about 20 of these, which previously filled the log with warnings.
 - Change: `image:` removed from config.yaml, so Home Assistant builds the add-on locally from this repository.
 - Note: the 0x3F34 "relay" fields read bytes 39–41, which Batrium's layout puts inside the average-charge-current float. Left in place so existing entities don't vanish, but they are almost certainly not relays.
 

@@ -49,6 +49,7 @@ from batrium.protocol import (  # noqa: E402
     MSG_SHUNT_METRICS,
     MSG_NAMES,
     MIN_LEN,
+    KNOWN_UNDECODED,
     NODE_STATUS_NAMES,
 )
 from batrium.discovery import (  # noqa: E402
@@ -191,11 +192,16 @@ class BatriumUdpProtocol(asyncio.DatagramProtocol):
         name = MSG_NAMES.get(msg_type)
 
         if name is None:
-            logger.warning(
-                "Unrecognised message type 0x%04X (%d bytes) — this addon does "
-                "not decode it. Please report it at %s/issues so it can be added.",
-                msg_type, size, ADDON_URL,
-            )
+            known = KNOWN_UNDECODED.get(msg_type)
+            if known:
+                logger.debug("Ignoring 0x%04X %s (%d bytes) — documented, not decoded",
+                             msg_type, known, size)
+            else:
+                # Not in Batrium's published payload list either (a WM5 also
+                # sends 0x3031, 0x3033, 0x5931, 0x5932, 0x5A31, 0x5A32, 0x5B31).
+                # Info, not warning: there is no layout to decode them from.
+                logger.info("Undocumented message type 0x%04X (%d bytes) — ignored",
+                            msg_type, size)
             return
 
         need = MIN_LEN.get(msg_type)
