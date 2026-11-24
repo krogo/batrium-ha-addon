@@ -1,3 +1,12 @@
+## 1.1.1 (fork)
+
+Corrections from the first run against a live WM5:
+
+- Fix: charger/inverter (0x4932) voltages are 0.1 V/bit, not 0.01 — targets read 5.74 / 4.62 V instead of 57.4 / 46.2 V.
+- Fix: WatchMon timestamps are local wall-clock time, not UTC; they were shown shifted by the UTC offset. Now given Home Assistant's timezone. Adds `tzdata`.
+- Fix: "Lifetime Energy In/Out" (0x3233) were the same daily counters as 0x5432's "Today Energy In/Out". Removed; the daily sensors remain and work in the Energy dashboard.
+- Fix: Relay 1–3 are no longer read from 0x3F34, where those bytes belong to a current value (all read "on"). Relay, contactor and expansion-battery entities are now registered only when 0x3F33 — the message that actually carries them — arrives. Existing ones are removed on start.
+
 ## 1.1.0 (fork)
 
 - Add: decoders for 0x5732 SystemDiscovery, 0x4932 RemoteStatus, 0x3233 LiveDisplay, 0x5432 DailySession and 0x7832 ShuntMetrics, from Batrium's published layouts. Their entities are registered the first time each message arrives, so message types your WatchMon never sends don't leave permanently-unknown entities.
