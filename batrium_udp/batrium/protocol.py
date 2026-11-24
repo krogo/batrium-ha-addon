@@ -35,6 +35,15 @@ def _w_to_kw(w: float) -> float:
     return round(w / 1000.0, 2)
 
 
+def _f32_div(raw: float, div: float) -> float:
+    """
+    Divide a float32 field without rounding to a fixed number of decimals:
+    keep the 7 significant digits a float32 actually carries, and drop the
+    conversion noise (1.2345 not 1.2345000505447388).
+    """
+    return float(f"{raw / div:.7g}")
+
+
 def _epoch(ts: int) -> str | None:
     """WatchMon epoch seconds -> ISO-8601 for HA timestamp sensors; 0 = never."""
     if ts <= 0:
@@ -201,7 +210,7 @@ def parse_4232(data: bytes) -> dict | None:
         "op_status_name": NODE_STATUS_NAMES.get(op, f"Unknown({op})"),
         "in_bypass":     op in (7, 8, 9),
         "is_overdue":    bool(data[21]),
-        "bypass_session_ah": round(struct.unpack_from("<f", data, 47)[0] / 1000.0, 3),
+        "bypass_session_ah": _f32_div(struct.unpack_from("<f", data, 47)[0], 1000.0),
     }
 
 
@@ -232,8 +241,8 @@ def parse_3e33(data: bytes) -> dict | None:
         "cells_overdue":         data[34],                                  # CMU comms failures
         "cells_active":          data[35],                                  # cells responding
         "cells_in_system":       data[36],                                  # total cell count
-        "min_bypass_session_ah": round(struct.unpack_from("<f", data, 38)[0] / 1000.0, 3),
-        "max_bypass_session_ah": round(struct.unpack_from("<f", data, 42)[0] / 1000.0, 3),
+        "min_bypass_session_ah": _f32_div(struct.unpack_from("<f", data, 38)[0], 1000.0),
+        "max_bypass_session_ah": _f32_div(struct.unpack_from("<f", data, 42)[0], 1000.0),
     }
 
 
@@ -502,8 +511,8 @@ def parse_3233(data: bytes) -> dict | None:
         "temp_max_c":             data[19] - 40,
         "temp_avg_c":             data[20] - 40,
         "bypass_count":           data[21],
-        "lifetime_kwh_charge":    round(struct.unpack_from("<f", data, 38)[0] / 1000.0, 3),
-        "lifetime_kwh_discharge": round(struct.unpack_from("<f", data, 42)[0] / 1000.0, 3),
+        "lifetime_kwh_charge":    _f32_div(struct.unpack_from("<f", data, 38)[0], 1000.0),
+        "lifetime_kwh_discharge": _f32_div(struct.unpack_from("<f", data, 42)[0], 1000.0),
         "critical_events":        data[46],
         "system_time":            _epoch(struct.unpack_from("<i", data, 47)[0]),
     }

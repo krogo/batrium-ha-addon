@@ -144,7 +144,7 @@ struct.pack_into("<h", b, 16, 450)
 b[20] = 7
 struct.pack_into("<f", b, 47, 1_234.5)
 r = p.parse_4232(bytes(b))
-eq((r["volt_min_v"], r["bypass_a"], r["bypass_session_ah"]), (3.312, 0.45, 1.234), "4232")
+eq((r["volt_min_v"], r["bypass_a"], r["bypass_session_ah"]), (3.312, 0.45, 1.2345), "4232 (session Ah at full float32 precision)")
 eq(r["op_status_name"], "InBypass", "4232 status")
 cell_pkt = bytes(b)
 

@@ -11,8 +11,8 @@ Confidence: **ref** = matches Batrium's reference decoder; **ref+NR** = also mat
 | `cell_N_volt`, `volt_min_v/max_v/avg_v` | 4232, 415A, 3E33, 5732, 3233 | int16 | mV | ÷1000 | V | ref+NR |
 | `cell_N_temp_c`, `temp_*_c`, all temps | all | uint8 | °C+40 | −40 | °C | ref+NR |
 | `cell_N_bypass_a`, `min/max_bypass_a` | 4232, 415A, 3E33 | int16 | mA | ÷1000 | A | ref+NR |
-| `cell_N_bypass_session_ah` | 4232 @47 | float32 | mAh | ÷1000 | Ah | ref+NR — **decide: Ah or mAh?** |
-| `min/max_bypass_session_ah` | 3E33 @38/42 | float32 | mAh | ÷1000 | Ah | ref (upstream published raw labelled Ah) |
+| `cell_N_bypass_session_ah` | 4232 @47 | float32 | mAh | ÷1000, 7 significant digits (full float32 precision) | Ah | ref+NR |
+| `min/max_bypass_session_ah` | 3E33 @38/42 | float32 | mAh | ÷1000, 7 significant digits | Ah | ref (upstream published raw labelled Ah) |
 
 ## Shunt (0x3F34)
 
@@ -45,7 +45,7 @@ The reference applies no scaling to any of these.
 
 | Published field | Msg | Offset / type | Raw unit | Scaling | Unit | Confidence |
 |---|---|---|---|---|---|---|
-| `lifetime_kwh_charge` / `_discharge` | 3233 | 38 / 42 float32 | Wh | ÷1000 | kWh | ref |
+| `lifetime_kwh_charge` / `_discharge` | 3233 | 38 / 42 float32 | Wh | ÷1000, 7 significant digits | kWh | ref |
 | `daily_kwh_charge` / `_discharge` | 5432 | 61 / 65 float32 | Wh | ÷1000 | kWh | ref |
 | `daily_ah_charge` / `_discharge` | 5432 | 53 / 57 float32 | mAh | ÷1000 | Ah | ref |
 | `daily_peak_charge_a` / `_discharge_a` | 5432 | 40 / 42 int16 | 10 mA | ÷100 | A | ref |
