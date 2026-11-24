@@ -28,7 +28,7 @@ def eq(got, want, label):
 
 # --- 0x5732 SystemDiscovery -------------------------------------------------
 b = pkt(0x5732, 50)
-b[8:16] = b"WM5\x00\x00\x00\x00\x00"
+b[8:16] = b"SYS7518\x00"
 struct.pack_into("<hh", b, 16, 215, 5)
 struct.pack_into("<i", b, 20, 1_700_000_000)
 b[24] = 4; b[25] = 1; b[26] = 1; b[27] = 4; b[28] = 2; b[29] = 0; b[30] = 1
@@ -38,7 +38,7 @@ struct.pack_into("<h", b, 42, 4650)
 struct.pack_into("<f", b, 44, -12_340.0)
 b[48] = 4
 r = p.parse_5732(bytes(b))
-eq(r["system_code"], "WM5", "5732 code")
+eq(r["system_code"], "SYS7518", "5732 code")
 eq(r["firmware_version"], 215, "5732 fw")
 eq(r["system_op_status_name"], "Charging", "5732 op")
 eq(r["auth_mode_name"], "Technician", "5732 auth")
@@ -228,3 +228,49 @@ units = {json.loads(pl).get("unit_of_measurement") for _, pl in allc}
 assert not units & {"mV", "mA", "W", "mAh"}, f"stray old units: {units}"
 
 print(f"all checks passed ({len(allc)} entity configs, units: {sorted(u for u in units if u)})")
+
+
+# --- Raw capture -------------------------------------------------------------
+import tempfile  # noqa: E402
+from batrium.capture import RawCapture  # noqa: E402
+
+
+class CapPub(FakePub):
+    def __init__(self):
+        super().__init__()
+        self.raw = []
+
+    def snapshot(self):
+        return dict(self.state)
+
+    def publish_raw(self, topic, payload):
+        self.raw.append((topic, payload))
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    cp = CapPub()
+    cap = RawCapture(cp, "bms", directory=tmp)
+    proto = m.BatriumUdpProtocol(cp, "bms", 0, cap)
+    unk = pkt(0x5931, 104); unk[20] = 7
+    proto.datagram_received(bytes(unk), ("x", 0))
+    proto.datagram_received(bytes(unk), ("x", 0))      # identical: MQTT yes, file no
+    unk[20] = 8
+    proto.datagram_received(bytes(unk), ("x", 0))      # changed: file yes
+    proto.datagram_received(bytes(pkt(0x3F34, 50)), ("x", 0))  # decoded: not captured
+    eq(len(cp.raw), 3, "every undecoded packet goes to MQTT")
+    eq(cp.raw[0][0], "batrium/bms/raw/5931", "raw topic")
+    files = os.listdir(tmp)
+    eq(len(files), 1, "one daily file")
+    lines = [json.loads(x) for x in open(os.path.join(tmp, files[0]))]
+    kinds = [x["kind"] for x in lines]
+    eq(kinds, ["raw", "state", "raw"], "raw lines only on change; state at most once a minute")
+    eq((lines[0]["type"], lines[0]["len"]), ("5931", 104), "raw record")
+    assert bytes.fromhex(lines[2]["hex"])[20] == 8, "hex round-trips"
+
+# Bool option parsing from env (bool is a subclass of int)
+os.environ["RAW_CAPTURE"] = "true"
+assert m.load_config()["raw_capture"] is True, "RAW_CAPTURE=true -> True"
+os.environ["RAW_CAPTURE"] = "false"
+assert m.load_config()["raw_capture"] is False, "RAW_CAPTURE=false -> False"
+
+print("raw capture checks passed")

@@ -1,6 +1,11 @@
+## 1.2.0 (fork)
+
+- Add: `raw_capture` option (off by default). Publishes every undecoded message type as hex to `batrium/<system>/raw/<TYPE>` and logs changes, with periodic snapshots of the decoded values, to `/share/batrium_raw/YYYY-MM-DD.jsonl`, for working out the undocumented messages. Maps `/share` read-write.
+- Docs: hardware named correctly as WatchMon Core with CellMate K9 (was "WM5").
+
 ## 1.1.1 (fork)
 
-Corrections from the first run against a live WM5:
+Corrections from the first run against a live WatchMon Core + CellMate K9:
 
 - Fix: charger/inverter (0x4932) voltages are 0.1 V/bit, not 0.01 — targets read 5.74 / 4.62 V instead of 57.4 / 46.2 V.
 - Fix: WatchMon timestamps are local wall-clock time, not UTC; they were shown shifted by the UTC offset. Now given Home Assistant's timezone. Adds `tzdata`.
@@ -16,7 +21,7 @@ Corrections from the first run against a live WM5:
 - Change: units now V, A, kW, Ah (were mV, mA, W, mAh), matching the Node-RED flow this replaces. Unique IDs changed with the units and the old entities are removed on start, so HA history isn't mixed across scales.
 - Fix: bypass session values from 0x3E33 were raw mAh labelled Ah. Now divided by 1000, per Batrium's reference.
 - Fix: cell status names for codes 4, 6, 10, 11, 12 (Timeout, Disabled, MissingSetup, NoConfig, CellOutLimits) were reported as Unknown.
-- Change: message types Batrium documents but this add-on doesn't decode (setup echoes, lifetime/history metrics, comms status) are logged once at debug instead of as a warning. Types not in Batrium's published list are logged once at info. A live WM5 sends about 20 of these, which previously filled the log with warnings.
+- Change: message types Batrium documents but this add-on doesn't decode (setup echoes, lifetime/history metrics, comms status) are logged once at debug instead of as a warning. Types not in Batrium's published list are logged once at info. A live WatchMon Core sends about 20 of these, which previously filled the log with warnings.
 - Change: `image:` removed from config.yaml, so Home Assistant builds the add-on locally from this repository.
 - Note: the 0x3F34 "relay" fields read bytes 39–41, which Batrium's layout puts inside the average-charge-current float. Left in place so existing entities don't vanish, but they are almost certainly not relays.
 
