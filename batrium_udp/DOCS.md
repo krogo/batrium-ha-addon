@@ -34,6 +34,15 @@ Default: `bms`. Only change this if you have multiple Batrium systems on the sam
 ### `log_level`
 Logging verbosity. `info` is recommended for normal use. Use `debug` if troubleshooting.
 
+### `raw_capture`
+Off by default. For reverse-engineering the message types this add-on doesn't decode (on a WatchMon Core: 0x3031, 0x3033, 0x5931, 0x5932, 0x5A31, 0x5A32, 0x5B31, plus the documented-but-undecoded setup and metrics messages).
+
+When on:
+- Every undecoded packet is published as hex to `batrium/<system_name>/raw/<TYPE>` (not retained). Watch it live under Settings → Devices & services → MQTT → Configure → Listen to a topic, e.g. `batrium/bms/raw/#`.
+- A daily file `/share/batrium_raw/YYYY-MM-DD.jsonl` gets one line per packet whose bytes changed since the last one of that type, plus a snapshot of all decoded values at most once a minute. Line them up by time to find which bytes track which values.
+
+Expect up to roughly 15 MB a day. Turn it off when you have enough data; nothing is deleted automatically.
+
 ## After starting
 
 Within a few seconds of starting, the addon log should show:

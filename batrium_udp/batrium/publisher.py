@@ -109,6 +109,16 @@ class BatriumPublisher:
         with self._state_lock:
             self._state.update(updates)
 
+    def snapshot(self) -> dict:
+        """Thread-safe copy of the current decoded state."""
+        with self._state_lock:
+            return dict(self._state)
+
+    def publish_raw(self, topic: str, payload: str) -> None:
+        """Fire-and-forget, not retained. Dropped silently while disconnected."""
+        if self._connected:
+            self._client.publish(topic, payload)
+
     def publish_node_discovery(self, configs: list[tuple[str, str]]) -> bool:
         """
         Publish discovery configs for a newly-seen node.

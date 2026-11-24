@@ -61,6 +61,7 @@ from batrium.discovery import (  # noqa: E402
     build_unit_migration_deletes,
 )
 from batrium.publisher import BatriumPublisher  # noqa: E402
+from batrium.capture import RawCapture  # noqa: E402
 
 # Messages handled generically by _handle_group (added in this fork).
 GROUP_PARSERS = {
@@ -97,6 +98,7 @@ def load_config() -> dict:
         "udp_port":      18542,
         "system_name":   "Stanley",
         "log_level":     "info",
+        "raw_capture":   False,
     }
 
     options_path = "/data/options.json"
@@ -107,7 +109,12 @@ def load_config() -> dict:
     for key, default in cfg.items():
         env_val = os.environ.get(key.upper())
         if env_val is not None:
-            cfg[key] = int(env_val) if isinstance(default, int) else env_val
+            if isinstance(default, bool):        # check before int: bool is an int
+                cfg[key] = env_val.strip().lower() in ("1", "true", "yes", "on")
+            elif isinstance(default, int):
+                cfg[key] = int(env_val)
+            else:
+                cfg[key] = env_val
 
     return cfg
 
@@ -126,12 +133,14 @@ class BatriumUdpProtocol(asyncio.DatagramProtocol):
     auto-discovery configs so HA immediately creates entities for that node.
     """
 
-    def __init__(self, publisher: BatriumPublisher, system_name: str, sys_id: int):
+    def __init__(self, publisher: BatriumPublisher, system_name: str, sys_id: int,
+                 capture: "RawCapture | None" = None):
         self._publisher    = publisher
         self._system_name  = system_name
         self._sys_id       = sys_id
         self._seen_nodes: set[int] = set()
         self._seen_msg_types: set[int] = set()
+        self._capture = capture
         self._discovered_groups: set[int] = set()
         self._cells: dict[int, dict] = {}          # node_id -> {"v": volts, "t": °C}
         self._authoritative: set[str] = set()      # pack keys a pack message has supplied
@@ -230,6 +239,9 @@ class BatriumUdpProtocol(asyncio.DatagramProtocol):
 
         # Data is arriving; is any of it actually getting out?
         self._check_delivery()
+
+        if self._capture is not None and msg_type not in MSG_NAMES:
+            self._capture.packet(msg_type, data)
 
         if msg_type == MSG_CELL_NODE_STATUS:
             # Preferred: all cells in one atomic snapshot
@@ -468,11 +480,13 @@ async def main() -> None:
     )
     publisher.start()
 
+    capture = RawCapture(publisher, cfg["system_name"]) if cfg["raw_capture"] else None
+
     loop = asyncio.get_event_loop()
     logger.info("Binding UDP on 0.0.0.0:%d", cfg["udp_port"])
     try:
         transport, _protocol = await loop.create_datagram_endpoint(
-            lambda: BatriumUdpProtocol(publisher, cfg["system_name"], sys_id),
+            lambda: BatriumUdpProtocol(publisher, cfg["system_name"], sys_id, capture),
             local_addr=("0.0.0.0", cfg["udp_port"]),
             allow_broadcast=True,
         )

@@ -1,3 +1,8 @@
+## 1.2.0 (fork)
+
+- Add: `raw_capture` option (off by default). Publishes every undecoded message type as hex to `batrium/<system>/raw/<TYPE>` and logs changes, with periodic snapshots of the decoded values, to `/share/batrium_raw/YYYY-MM-DD.jsonl`, for working out the undocumented messages. Maps `/share` read-write.
+- Docs: hardware named correctly as WatchMon Core with CellMate K9 (was "WM5").
+
 ## 1.1.1 (fork)
 
 Corrections from the first run against a live WatchMon Core + CellMate K9:
