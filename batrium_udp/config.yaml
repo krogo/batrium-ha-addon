@@ -1,8 +1,8 @@
 name: "Batrium UDP"
-description: "Listens for Batrium WatchMon UDP broadcasts and publishes to Home Assistant via MQTT auto-discovery. Zero manual HA configuration required. Community addon by RKflyer."
+description: "Listens for Batrium WatchMon UDP broadcasts and publishes to Home Assistant via MQTT auto-discovery. Zero manual HA configuration required. Fork of RKflyer's addon with extended decoding."
 version: "1.1.0"
 slug: "batrium_udp"
-url: "https://github.com/rkflyer/batrium-ha-addon"
+url: "https://github.com/krogo/batrium-ha-addon"
 startup: application
 init: false
 host_network: true

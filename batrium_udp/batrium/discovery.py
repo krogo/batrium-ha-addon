@@ -22,7 +22,7 @@ DEVICE_NAME         = "Batrium"
 
 
 ADDON_VERSION       = "1.1.0"
-ADDON_URL           = "https://github.com/rkflyer/batrium-ha-addon"
+ADDON_URL           = "https://github.com/krogo/batrium-ha-addon"
 
 
 def _device(system_name: str, sys_id: int) -> dict:
@@ -31,7 +31,7 @@ def _device(system_name: str, sys_id: int) -> dict:
         "name":              DEVICE_NAME,
         "manufacturer":      DEVICE_MANUFACTURER,
         "model":             DEVICE_MODEL,
-        "sw_version":        f"RKflyer/batrium-ha-addon {ADDON_VERSION}",
+        "sw_version":        f"krogo/batrium-ha-addon {ADDON_VERSION}",
         "configuration_url": ADDON_URL,
     }
 
