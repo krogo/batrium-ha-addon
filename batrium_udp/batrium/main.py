@@ -197,7 +197,7 @@ class BatriumUdpProtocol(asyncio.DatagramProtocol):
                 logger.debug("Ignoring 0x%04X %s (%d bytes) — documented, not decoded",
                              msg_type, known, size)
             else:
-                # Not in Batrium's published payload list either (a WM5 also
+                # Not in Batrium's published payload list either (a WatchMon Core also
                 # sends 0x3031, 0x3033, 0x5931, 0x5932, 0x5A31, 0x5A32, 0x5B31).
                 # Info, not warning: there is no layout to decode them from.
                 logger.info("Undocumented message type 0x%04X (%d bytes) — ignored",

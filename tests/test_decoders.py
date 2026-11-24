@@ -28,7 +28,7 @@ def eq(got, want, label):
 
 # --- 0x5732 SystemDiscovery -------------------------------------------------
 b = pkt(0x5732, 50)
-b[8:16] = b"WM5\x00\x00\x00\x00\x00"
+b[8:16] = b"SYS7518\x00"
 struct.pack_into("<hh", b, 16, 215, 5)
 struct.pack_into("<i", b, 20, 1_700_000_000)
 b[24] = 4; b[25] = 1; b[26] = 1; b[27] = 4; b[28] = 2; b[29] = 0; b[30] = 1
@@ -38,7 +38,7 @@ struct.pack_into("<h", b, 42, 4650)
 struct.pack_into("<f", b, 44, -12_340.0)
 b[48] = 4
 r = p.parse_5732(bytes(b))
-eq(r["system_code"], "WM5", "5732 code")
+eq(r["system_code"], "SYS7518", "5732 code")
 eq(r["firmware_version"], 215, "5732 fw")
 eq(r["system_op_status_name"], "Charging", "5732 op")
 eq(r["auth_mode_name"], "Technician", "5732 auth")
