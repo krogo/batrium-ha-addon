@@ -379,6 +379,7 @@ class BatriumUdpProtocol(asyncio.DatagramProtocol):
         parsed = parse_3f33(data)
         if not parsed:
             return
+        self._discover_group(MSG_STATUS_FAST)
         self._publisher.update_state({
             "op_status":            parsed["op_status"],
             "op_status_name":       parsed["op_status_name"],
@@ -394,6 +395,19 @@ class BatriumUdpProtocol(asyncio.DatagramProtocol):
             "load_contactor":       parsed["load_contactor"],
         })
 
+    def _discover_group(self, msg_type: int) -> None:
+        """Register a message group's entities with HA, once, on first receipt."""
+        if msg_type in self._discovered_groups:
+            return
+        self._discovered_groups.add(msg_type)
+        configs = build_group_discovery_configs(msg_type, self._system_name, self._sys_id)
+        if configs:
+            sent = self._publisher.publish_node_discovery(configs)
+            logging.getLogger(__name__).info(
+                "%s: %s %d entities", MSG_NAMES[msg_type],
+                "published" if sent else "QUEUED (MQTT not connected):", len(configs),
+            )
+
     def _handle_group(self, data: bytes, msg_type: int) -> None:
         """
         Messages added in this fork. Entities for each are registered with HA
@@ -404,15 +418,7 @@ class BatriumUdpProtocol(asyncio.DatagramProtocol):
         if not parsed:
             return
 
-        if msg_type not in self._discovered_groups:
-            self._discovered_groups.add(msg_type)
-            configs = build_group_discovery_configs(msg_type, self._system_name, self._sys_id)
-            if configs:
-                sent = self._publisher.publish_node_discovery(configs)
-                logging.getLogger(__name__).info(
-                    "%s: %s %d entities", MSG_NAMES[msg_type],
-                    "published" if sent else "QUEUED (MQTT not connected):", len(configs),
-                )
+        self._discover_group(msg_type)
 
         pack_keys = PACK_KEYS & parsed.keys()
         if pack_keys:

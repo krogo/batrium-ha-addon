@@ -21,7 +21,7 @@ DEVICE_MODEL        = "WatchMon Core"
 DEVICE_NAME         = "Batrium"
 
 
-ADDON_VERSION       = "1.1.0"
+ADDON_VERSION       = "1.1.1"
 ADDON_URL           = "https://github.com/krogo/batrium-ha-addon"
 
 
@@ -168,13 +168,6 @@ def build_discovery_configs(system_name: str, sys_id: int) -> list[tuple[str, st
     # --- Binary: balancing / contactors / relays ---
     B("balancing_active",  "Balancing Active",  "balancing_active")
     B("soc_recal_needed",  "SOC Recalibration Needed", "soc_recal_needed")
-    B("contactor_battery", "Battery Contactor", "contactor_batt")
-    B("load_contactor",    "Load Contactor",    "load_contactor")
-    B("expansion_battery", "Expansion Battery", "expansion_battery_on")
-    B("relay_1",           "Relay 1",           "relay_1")
-    B("relay_2",           "Relay 2",           "relay_2")
-    B("relay_3",           "Relay 3",           "relay_3")
-    B("relay_4",           "Relay 4",           "relay_4")
 
     return configs
 
@@ -264,6 +257,13 @@ def build_unit_migration_deletes(sys_id: int) -> list[tuple[str, str]]:
             "min_bypass_ma", "max_bypass_ma"]
     cell = ["volt", "bypass_ma", "bypass_mah"]
     out = [(f"homeassistant/sensor/batrium_{sys_id}_{f}/config", "") for f in pack]
+    # 3233's kWh fields turned out to be daily, not lifetime (1.1.1).
+    out += [(f"homeassistant/sensor/batrium_{sys_id}_{f}/config", "")
+            for f in ("lifetime_kwh_charge", "lifetime_kwh_discharge")]
+    # 0x3F33-only entities; re-registered on receipt of 0x3F33 (1.1.1).
+    out += [(f"homeassistant/binary_sensor/batrium_{sys_id}_{f}/config", "")
+            for f in ("contactor_battery", "load_contactor", "expansion_battery",
+                      "relay_1", "relay_2", "relay_3", "relay_4")]
     for n in range(1, 33):
         out += [(f"homeassistant/sensor/batrium_{sys_id}_cell{n}_{f}/config", "") for f in cell]
     return out
@@ -275,7 +275,7 @@ def build_group_discovery_configs(
     """Entities for one of the fork's message groups; published on first receipt."""
     from batrium.protocol import (
         MSG_SYSTEM_DISCOVERY, MSG_REMOTE_STATUS, MSG_LIVE_DISPLAY,
-        MSG_DAILY_SESSION, MSG_SHUNT_METRICS,
+        MSG_DAILY_SESSION, MSG_SHUNT_METRICS, MSG_STATUS_FAST,
     )
 
     state_topic = f"batrium/{system_name}/state"
@@ -310,10 +310,6 @@ def build_group_discovery_configs(
         B("charge_limited",    "Charge Limited",      "charge_limited")
         B("discharge_on",      "Discharging Allowed", "discharge_on")
         B("discharge_limited", "Discharge Limited",   "discharge_limited")
-        S("lifetime_kwh_charge",    "Lifetime Energy In",  "lifetime_kwh_charge",
-          unit="kWh", device_class="energy", state_class="total_increasing", icon="mdi:battery-arrow-up")
-        S("lifetime_kwh_discharge", "Lifetime Energy Out", "lifetime_kwh_discharge",
-          unit="kWh", device_class="energy", state_class="total_increasing", icon="mdi:battery-arrow-down")
         S("critical_events", "Critical Events", "critical_events", icon="mdi:alert")
 
     elif msg_type == MSG_REMOTE_STATUS:
@@ -340,6 +336,15 @@ def build_group_discovery_configs(
         S("daily_temp_max_c", "Today Max Temp", "daily_temp_max_c", unit="°C", device_class="temperature")
         S("daily_soc_min_pct", "Today Min SOC", "daily_soc_min_pct", unit="%", device_class="battery")
         S("daily_soc_max_pct", "Today Max SOC", "daily_soc_max_pct", unit="%", device_class="battery")
+
+    elif msg_type == MSG_STATUS_FAST:
+        # Real relay/contactor states. Only registered if the WatchMon sends
+        # 0x3F33; a WM5 on current firmware does not.
+        B("contactor_battery", "Battery Contactor", "contactor_batt")
+        B("load_contactor",    "Load Contactor",    "load_contactor")
+        B("expansion_battery", "Expansion Battery", "expansion_battery_on")
+        for i in range(1, 5):
+            B(f"relay_{i}", f"Relay {i}", f"relay_{i}")
 
     elif msg_type == MSG_SHUNT_METRICS:
         S("shunt_soc_cycles",    "SOC Cycles",            "shunt_soc_cycles", state_class="total_increasing", icon="mdi:counter")

@@ -60,7 +60,6 @@ All entities appear under a single **Batrium** device in HA → Settings → Dev
 | Cells Balancing | count | |
 | Cells Active / In System | count | |
 | Min / Peak Bypass Current | A | Balancing current |
-| Relay 1 / 2 / 3 | on/off | |
 | Balancing Active | on/off | True if any cell is balancing |
 | Supply Voltage, Ambient / Shunt Temp | V, °C | From 0x3F34 |
 | Capacity To Full / Empty | Ah | From 0x3F34 |
@@ -72,9 +71,10 @@ All entities appear under a single **Batrium** device in HA → Settings → Dev
 | Source | Entities |
 |--------|----------|
 | 0x5732 SystemDiscovery | WatchMon Status (the WatchMon's own, not derived), Charge / Discharge Power State, Critical Battery OK, Heating / Cooling On, Auth Mode, Cell Poller Mode, Firmware, WatchMon Clock |
-| 0x3233 LiveDisplay | Lifetime Energy In / Out (kWh, `total_increasing` — use these for the Energy dashboard), Charging / Discharging Allowed, Charge / Discharge Limited, Critical Events |
+| 0x3233 LiveDisplay | Charging / Discharging Allowed, Charge / Discharge Limited, Critical Events |
+| 0x3F33 SystemStatus (older firmware) | Relay 1–4, Battery / Load Contactor, Expansion Battery |
 | 0x4932 RemoteStatus | Charger / Inverter Target and Actual Voltage and Current, Temp, Last Message |
-| 0x5432 DailySession | Today Energy In / Out (kWh), Today Charge / Discharge (Ah), peaks, daily min/max cell V, temp, SOC |
+| 0x5432 DailySession | Today Energy In / Out (kWh, `total_increasing` — use these for the Energy dashboard), Today Charge / Discharge (Ah), peaks, daily min/max cell V, temp, SOC |
 | 0x7832 ShuntMetrics | SOC Cycles, Last Low / High SOC Recalibration |
 
 See [SCALING.md](SCALING.md) for every field's raw encoding and how it is scaled.

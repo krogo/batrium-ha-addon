@@ -3,9 +3,12 @@ Hand-built packets with known values at the offsets given in Batrium's
 WatchMonUdpListener layouts; checks the fork decodes them to the expected
 published units. Run: python3 -I tests/test_decoders.py <path-to-batrium_udp>
 """
+import os
 import struct
 import sys
 
+# WatchMon timestamps are local wall-clock; pin the zone so results are fixed.
+os.environ["TZ"] = "America/New_York"
 sys.path.insert(0, sys.argv[1])
 from batrium import protocol as p  # noqa: E402
 from batrium import main as m      # noqa: E402
@@ -47,22 +50,24 @@ eq(r["temp_min_c"], 18, "5732 temp")
 eq(r["cells_active"], 14, "5732 cells")
 eq(r["cmu_poller_mode_name"], "Normal", "5732 poller")
 eq(r["shunt_status_name"], "Charging", "5732 shunt status")
-eq(r["system_time"], "2023-11-14T22:13:20+00:00", "5732 time")
+# 1_700_000_000 decodes as wall-clock 2023-11-14 22:13:20 local (EST, -05:00)
+eq(r["system_time"], "2023-11-14T22:13:20-05:00", "5732 time (local wall clock)")
 
 # --- 0x4932 RemoteStatus ----------------------------------------------------
 b = pkt(0x4932, 62)
 b[8:11] = bytes([5, 6, 7]); b[11] = 40 + 25
-struct.pack_into("<hhhhhh", b, 12, 5600, 1000, 5000, 5580, 987, 4900)
+struct.pack_into("<hhhhhh", b, 12, 574, 3000, 5000, 558, 987, 4900)
 struct.pack_into("<I", b, 32, 1_700_000_000)
 b[37] = 40 + 30
 struct.pack_into("<hhhhhh", b, 38, 4800, 2000, 9000, 4810, -1500, 7000)
 struct.pack_into("<I", b, 58, 0)
 r = p.parse_4932(bytes(b))
 eq(r["remote_charge_temp_c"], 25, "4932 chg temp")
-eq(r["remote_charge_target_v"], 56.0, "4932 chg tv")
-eq(r["remote_charge_target_a"], 100, "4932 chg ta (Node-RED x/10, integer)")
+eq(r["remote_charge_target_v"], 57.4, "4932 chg tv (0.1 V/bit, live-confirmed)")
+eq(r["remote_charge_actual_v"], 55.8, "4932 chg av")
+eq(r["remote_charge_target_a"], 300, "4932 chg ta (Node-RED x/10, integer)")
 eq(r["remote_charge_actual_a"], 98.7, "4932 chg aa")
-eq(r["remote_charge_last_rx"], "2023-11-14T22:13:20+00:00", "4932 chg rx")
+eq(r["remote_charge_last_rx"], "2023-11-14T22:13:20-05:00", "4932 chg rx")
 eq(r["remote_discharge_temp_c"], 30, "4932 dis temp")
 eq(r["remote_discharge_target_a"], 200, "4932 dis ta")
 eq(r["remote_discharge_actual_a"], -150.0, "4932 dis aa")
@@ -91,6 +96,7 @@ eq((r["capacity_to_full_ah"], r["capacity_to_empty_ah"]), (35.5, 244.25), "3f34 
 eq((r["est_mins_to_full"], r["est_mins_to_empty"]), (120, 570), "3f34 mins")
 eq((r["avg_charge_a"], r["avg_discharge_a"], r["avg_net_a"]), (10.12, 15.33, -5.21), "3f34 avgs")
 eq(r["op_status_name"], "Discharging", "3f34 derived op")
+assert not any(k.startswith("relay_") for k in r), "3f34 must not publish fake relays"
 
 # --- 0x3233 LiveDisplay -----------------------------------------------------
 b = pkt(0x3233, 57)
@@ -106,7 +112,7 @@ eq(r["system_op_status_name"], "Discharging", "3233 op")
 eq((r["critical_batt_ok"], r["heat_on"], r["cool_on"]), (True, True, False), "3233 b10")
 eq((r["charge_on"], r["charge_limited"], r["discharge_on"]), (True, False, True), "3233 b11")
 eq((r["temp_min_c"], r["temp_max_c"], r["temp_avg_c"], r["bypass_count"]), (15, 22, 19, 3), "3233 temps")
-eq((r["lifetime_kwh_charge"], r["lifetime_kwh_discharge"]), (1234.567, 1111.111), "3233 kWh")
+assert not any("lifetime" in k for k in r), "3233 kWh is daily, not lifetime; not published"
 eq(r["critical_events"], 2, "3233 crit")
 
 # --- 0x5432 DailySession ----------------------------------------------------
@@ -133,7 +139,7 @@ struct.pack_into("<h", b, 10, 412)
 struct.pack_into("<II", b, 16, 1_700_000_000, 0)
 r = p.parse_7832(bytes(b))
 eq(r["shunt_soc_cycles"], 412, "7832 cycles")
-eq((r["shunt_last_lo_recal"], r["shunt_last_hi_recal"]), ("2023-11-14T22:13:20+00:00", None), "7832 recal")
+eq((r["shunt_last_lo_recal"], r["shunt_last_hi_recal"]), ("2023-11-14T22:13:20-05:00", None), "7832 recal")
 
 # --- 0x4232 CellNode (existing, units changed) -----------------------------
 b = pkt(0x4232, 52)
@@ -195,8 +201,13 @@ eq((pub.state["volt_min_v"], pub.state["volt_max_v"]), (3.0, 3.5), "authoritativ
 eq(pub.state["temp_min_c"], 10, "authoritative Tmin kept")
 eq(pub.state["temp_max_c"], 24, "Tmax still derived (5732 lacks it)")
 uids = [t for t, _ in pub.disc]
+assert not any("relay_" in t for t in uids), "relay entities only after 0x3F33"
+b = pkt(0x3F33, 80); b[50] = 1
+proto.datagram_received(bytes(b), ("x", 0))
+assert any("relay_1" in t for t, _ in pub.disc), "0x3F33 registers relay entities"
+eq(pub.state["relay_1"], True, "3f33 relay")
 assert any("system_op_status" in t for t in uids), "5732 group discovered"
-assert not any("lifetime_kwh" in t for t in uids), "3233 not discovered before receipt"
+assert not any("charge_on" in t for t in uids), "3233 not discovered before receipt"
 n_before = len(pub.disc)
 proto.datagram_received(bytes(b), ("x", 0))
 eq(len(pub.disc), n_before, "group discovery published once")

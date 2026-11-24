@@ -14,7 +14,9 @@ Hardware note on cell voltages via UDP:
 
 import struct
 import logging
+import os
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 # --- Units -------------------------------------------------------------------
@@ -44,11 +46,36 @@ def _f32_div(raw: float, div: float) -> float:
     return float(f"{raw / div:.7g}")
 
 
+def _local_tz():
+    """
+    Home Assistant's timezone. The Supervisor passes it to add-ons as TZ;
+    fall back to the container's local zone, then UTC.
+    """
+    name = os.environ.get("TZ")
+    if name:
+        try:
+            return ZoneInfo(name)
+        except (ZoneInfoNotFoundError, ValueError):
+            _LOGGER.warning("Unknown TZ %r; WatchMon timestamps will assume UTC", name)
+            return timezone.utc
+    return datetime.now().astimezone().tzinfo or timezone.utc
+
+
+_LOCAL_TZ = _local_tz()
+
+
 def _epoch(ts: int) -> str | None:
-    """WatchMon epoch seconds -> ISO-8601 for HA timestamp sensors; 0 = never."""
+    """
+    WatchMon "epoch" seconds -> ISO-8601 for HA timestamp sensors; 0 = never.
+
+    The WatchMon counts in LOCAL wall-clock time, not UTC: on a live WM5 in
+    America/New_York the clock field read 12:43 when it was 12:43 EST. So
+    the seconds are decoded as a wall-clock time and given HA's timezone.
+    """
     if ts <= 0:
         return None
-    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+    wall = datetime.fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None)
+    return wall.replace(tzinfo=_LOCAL_TZ).isoformat()
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,7 +91,7 @@ MSG_STATUS_FAST      = 0x3F33  # SOC, relays, contactors (older FW)
 MSG_STATUS_SHUNT     = 0x3F34  # ShuntCurrent/Voltage/Power/SOC (FW ≥ 2.15); 300ms
 MSG_SYSTEM_DISCOVERY = 0x5732  # System status, cell summary, shunt summary; 2s
 MSG_REMOTE_STATUS    = 0x4932  # Charger/inverter remote (CAN) target & actual; 2s
-MSG_LIVE_DISPLAY     = 0x3233  # Live display incl. lifetime kWh (FW ≥ 2.15); 2s
+MSG_LIVE_DISPLAY     = 0x3233  # Live display: status flags, cell summary (FW ≥ 2.15); 2s
 MSG_DAILY_SESSION    = 0x5432  # Today's session: kWh/Ah in/out, peaks; 20s
 MSG_SHUNT_METRICS    = 0x7832  # Shunt SOC cycles and recalibration times; 30s
 
@@ -346,7 +373,7 @@ def parse_3f34(data: bytes) -> dict | None:
       data[22:24]  ShuntSOC      int16le  /100 = %  (Coulomb-counted)
       data[24]     WatchMon SOC raw  (raw×0.5)−5 = %
       data[25]     op_status
-      data[39:42]  relay_1-3     (tentative, observed all zero)
+      (no relays here — see note in the return dict)
     """
     if len(data) < MIN_LEN[MSG_STATUS_SHUNT]:
         _LOGGER.debug("0x3F34 too short: %d bytes", len(data))
@@ -385,12 +412,9 @@ def parse_3f34(data: bytes) -> dict | None:
         "avg_net_a":             round(struct.unpack_from("<f", data, 46)[0] / 1000.0, 2),
         # Bit order taken from Batrium's comments (bit0 first); unverified on hardware.
         "soc_recal_needed":      bool(flags & 0x0C),
-        # NOTE: data[39:42] overlap avg_charge_a (38..41) per Batrium's layout, so
-        # the "relay" reads below are probably bytes of that float, not relays.
-        # Kept so existing entities don't vanish; don't trust them.
-        "relay_1":         bool(data[39]),
-        "relay_2":         bool(data[40]),
-        "relay_3":         bool(data[41]),
+        # Upstream read relay_1..3 from data[39:42]. Those bytes are inside the
+        # avg_charge_a float (38..41); on a live WM5 all three read "on" with no
+        # relays wired. Relays are only real in 0x3F33.
     }
 
 
@@ -473,10 +497,10 @@ def parse_4932(data: bytes) -> dict | None:
     What the WatchMon is asking a CAN-connected charger/inverter for (target)
     and what that device reports back (actual).
 
-    Scaling: Batrium's reference applies none. Amps are divided by 10 to match
-    the Node-RED flow this fork replaces (0.1 A/bit). Volts are assumed 0.01
-    V/bit like every other voltage in this protocol, and VA is passed raw —
-    neither has been checked against hardware.
+    Scaling: Batrium's reference applies none. Amps ÷10 (0.1 A/bit), matching
+    the Node-RED flow this fork replaces. Volts ÷10 (0.1 V/bit), confirmed on
+    a live 14S pack: targets of 574 / 462 = 57.4 V / 46.2 V = 4.1 / 3.3 V per
+    cell. VA is passed raw; unverified.
     """
     if len(data) < MIN_LEN[MSG_REMOTE_STATUS]:
         return None
@@ -485,10 +509,10 @@ def parse_4932(data: bytes) -> dict | None:
         tv, ta, tva, av, aa, ava = struct.unpack_from("<hhhhhh", data, base)
         return {
             f"{prefix}_temp_c":         data[temp_off] - 40,
-            f"{prefix}_target_v":       round(tv / 100.0, 2),
+            f"{prefix}_target_v":       round(tv / 10.0, 1),
             f"{prefix}_target_a":       round(ta / 10.0),
             f"{prefix}_target_va":      tva,
-            f"{prefix}_actual_v":       round(av / 100.0, 2),
+            f"{prefix}_actual_v":       round(av / 10.0, 1),
             f"{prefix}_actual_a":       round(aa / 10.0, 1),
             f"{prefix}_actual_va":      ava,
             f"{prefix}_last_rx":        _epoch(struct.unpack_from("<I", data, base + 20)[0]),
@@ -508,8 +532,9 @@ def parse_3233(data: bytes) -> dict | None:
     """
     Live Display (0x3233, 57 bytes, 2s, FW ≥ 2.15).
 
-    The one message carrying lifetime cumulative kWh in and out of the shunt —
-    the right source for HA's Energy dashboard (it never resets daily).
+    Its kWh in/out fields (38/42) are NOT lifetime: on a live WM5 they equal
+    0x5432's daily kWh to within the 20 s between the two messages, so they are
+    not published (the daily sensors cover them).
     """
     if len(data) < MIN_LEN[MSG_LIVE_DISPLAY]:
         return None
@@ -534,8 +559,6 @@ def parse_3233(data: bytes) -> dict | None:
         "temp_max_c":             data[19] - 40,
         "temp_avg_c":             data[20] - 40,
         "bypass_count":           data[21],
-        "lifetime_kwh_charge":    _f32_div(struct.unpack_from("<f", data, 38)[0], 1000.0),
-        "lifetime_kwh_discharge": _f32_div(struct.unpack_from("<f", data, 42)[0], 1000.0),
         "critical_events":        data[46],
         "system_time":            _epoch(struct.unpack_from("<i", data, 47)[0]),
     }
